@@ -34,7 +34,6 @@ dependencies = [
     "pikepdf",
     "peewee>=3.17.8",
     "fontTools",
-    "babeldoc>=0.3.50",
     "rich",
 ]
 
@@ -49,6 +48,9 @@ argostranslate = [
 ]
 mcp = [
     "mcp>=1.6.0",
+]
+babeldoc = [
+    "babeldoc>=0.3.50",
 ]
 
 [dependency-groups]
