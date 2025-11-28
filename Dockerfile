@@ -18,9 +18,6 @@ RUN apt-get update && \
      apt-get install --no-install-recommends -y libgl1 libglib2.0-0 libxext6 libsm6 libxrender1 && \
      rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml .
-RUN uv pip install --system --no-cache -r pyproject.toml && babeldoc --version && babeldoc --warmup
-
 COPY . .
 
 RUN uv pip install --system --no-cache . && uv pip install --system --no-cache -U "babeldoc<0.3.0" "pymupdf<1.25.3" "pdfminer-six==20250416" && babeldoc --version && babeldoc --warmup
