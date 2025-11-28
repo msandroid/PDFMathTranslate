@@ -1,0 +1,66 @@
+# Docker Compose configuration for PDFMathTranslate API
+# This configuration sets up:
+# - Redis server (for Celery broker and result backend)
+# - Flask API server (port 11008)
+# - Celery worker (for async translation tasks)
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: pdf2zh-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pdf2zh-api-network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: pdf2zh-api
+    ports:
+      - "11008:11008"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CELERY_BROKER=redis://redis:6379/0
+      - CELERY_RESULT=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["pdf2zh", "--flask"]
+    networks:
+      - pdf2zh-api-network
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: pdf2zh-worker
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CELERY_BROKER=redis://redis:6379/0
+      - CELERY_RESULT=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["pdf2zh", "--celery", "worker"]
+    networks:
+      - pdf2zh-api-network
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+
+networks:
+  pdf2zh-api-network:
+    driver: bridge
+
