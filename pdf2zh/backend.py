@@ -100,4 +100,6 @@ def get_translate_result(id: str, format: str):
 
 
 if __name__ == "__main__":
-    flask_app.run(host="0.0.0.0", port=11008)
+    import os
+    port = int(os.environ.get("PORT", 11008))
+    flask_app.run(host="0.0.0.0", port=port)
