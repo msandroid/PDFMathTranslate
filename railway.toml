@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "pip install --upgrade pip setuptools wheel && pip install flask>=3.0.0 celery>=5.3.0 redis>=5.0.0 && pip install . && pip install -U babeldoc<0.3.0 pymupdf<1.25.3 pdfminer-six==20250416"
+buildCommand = "pip install --upgrade pip setuptools wheel && pip install flask>=3.0.0 celery>=5.3.0 redis>=5.0.0 && pip install . && pip install --force-reinstall --no-deps flask>=3.0.0 celery>=5.3.0 redis>=5.0.0 && pip install -U babeldoc<0.3.0 pymupdf<1.25.3 pdfminer-six==20250416"
 
 [deploy]
 startCommand = "pdf2zh --celery worker --loglevel=info"
