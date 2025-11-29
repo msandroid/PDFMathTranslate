@@ -111,10 +111,14 @@ def get_redis_url():
 
 redis_url = get_redis_url()
 
+# get_redis_url()で修正されたredis_urlを優先的に使用
+# これにより、不完全なホスト名が修正された値が確実に使用される
+# CELERY_BROKERとCELERY_RESULTが明示的に設定されている場合でも、
+# get_redis_url()内で既に修正されているため、その値を使用
 flask_app.config.from_mapping(
     CELERY=dict(
-        broker_url=ConfigManager.get("CELERY_BROKER", redis_url),
-        result_backend=ConfigManager.get("CELERY_RESULT", redis_url),
+        broker_url=redis_url,
+        result_backend=redis_url,
         worker_prefetch_multiplier=1,
         task_acks_late=True,
         worker_max_tasks_per_child=1000,
