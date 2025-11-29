@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "pip install -r requirements.txt"
+buildCommand = "pip install -e .[backend] && pip install -U babeldoc<0.3.0 pymupdf<1.25.3 pdfminer-six==20250416"
 
 [deploy]
 startCommand = "pdf2zh --celery worker --loglevel=info"
