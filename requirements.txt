@@ -1,4 +1,1 @@
-pdf2zh
-flask
-celery
-redis
+-e .[backend]
