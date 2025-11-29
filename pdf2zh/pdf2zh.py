@@ -298,7 +298,53 @@ def main(args: Optional[List[str]] = None) -> int:
         from pdf2zh.backend import flask_app
 
         port = int(os.environ.get("PORT", 11008))
-        flask_app.run(host="0.0.0.0", port=port)
+        
+        # Use Gunicorn in production (when USE_GUNICORN env var is set or in Railway)
+        # Railway sets RAILWAY_ENVIRONMENT, but we can also check for other production indicators
+        use_gunicorn = os.environ.get("USE_GUNICORN", "false").lower() in ("true", "1", "yes")
+        is_production = os.environ.get("RAILWAY_ENVIRONMENT") is not None or os.environ.get("ENVIRONMENT") == "production"
+        
+        if use_gunicorn or is_production:
+            try:
+                import gunicorn.app.base
+                
+                class StandaloneApplication(gunicorn.app.base.BaseApplication):
+                    def __init__(self, app, options=None):
+                        self.options = options or {}
+                        self.application = app
+                        super().__init__()
+                    
+                    def load_config(self):
+                        for key, value in self.options.items():
+                            if key in self.cfg.settings and value is not None:
+                                self.cfg.set(key.lower(), value)
+                    
+                    def load(self):
+                        return self.application
+                
+                # Gunicorn configuration
+                options = {
+                    "bind": f"0.0.0.0:{port}",
+                    "workers": int(os.environ.get("GUNICORN_WORKERS", "2")),
+                    "worker_class": "sync",
+                    "timeout": int(os.environ.get("GUNICORN_TIMEOUT", "300")),  # 5 minutes default
+                    "keepalive": int(os.environ.get("GUNICORN_KEEPALIVE", "5")),
+                    "max_requests": int(os.environ.get("GUNICORN_MAX_REQUESTS", "1000")),
+                    "max_requests_jitter": int(os.environ.get("GUNICORN_MAX_REQUESTS_JITTER", "100")),
+                    "preload_app": False,  # Disable preload to avoid issues with Celery
+                    "accesslog": "-",  # Log to stdout
+                    "errorlog": "-",   # Log to stderr
+                    "loglevel": os.environ.get("GUNICORN_LOG_LEVEL", "info").lower(),
+                }
+                
+                StandaloneApplication(flask_app, options).run()
+            except ImportError:
+                # Fallback to Flask dev server if Gunicorn is not available
+                logger.warning("Gunicorn not available, falling back to Flask development server")
+                flask_app.run(host="0.0.0.0", port=port)
+        else:
+            # Development mode: use Flask dev server
+            flask_app.run(host="0.0.0.0", port=port)
         return 0
 
     if parsed_args.celery:

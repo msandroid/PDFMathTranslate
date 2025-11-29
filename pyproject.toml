@@ -39,13 +39,15 @@ dependencies = [
     "flask>=3.0.0",
     "celery>=5.3.0",
     "redis>=5.0.0",
+    "gunicorn>=21.2.0",
 ]
 
 [project.optional-dependencies]
 backend = [
     "flask",
     "celery",
-    "redis"
+    "redis",
+    "gunicorn"
 ]
 argostranslate = [
     "argostranslate"

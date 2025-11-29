@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, jsonify
 from celery import Celery, Task
 from celery.result import AsyncResult
 from pdf2zh import translate_stream
@@ -8,8 +8,24 @@ import io
 import os
 from pdf2zh.doclayout import ModelInstance
 from pdf2zh.config import ConfigManager
+from werkzeug.exceptions import RequestEntityTooLarge
 
 flask_app = Flask("pdf2zh")
+
+# Configure Flask app settings
+# Set maximum content length to 100MB (for PDF file uploads)
+flask_app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get("MAX_CONTENT_LENGTH", 100 * 1024 * 1024))  # 100MB default
+flask_app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching for translation results
+
+# Error handler for file size limit
+@flask_app.errorhandler(RequestEntityTooLarge)
+def handle_file_too_large(e):
+    max_size_mb = flask_app.config['MAX_CONTENT_LENGTH'] / (1024 * 1024)
+    return jsonify({
+        "status": "error",
+        "code": 413,
+        "message": f"File too large. Maximum file size is {max_size_mb:.0f}MB."
+    }), 413
 
 # Celeryワーカーの並行度を環境変数から取得（デフォルトは2、Railway推奨）
 # Railwayなどのクラウド環境では、メモリ制限があるため低めの値が推奨されます

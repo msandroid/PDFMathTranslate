@@ -27,6 +27,12 @@ Railwayでは、**2つのサービス**を作成する必要があります：
    - `PORT`: `11008`（Railwayが自動的に設定する場合もあります）
    - `CELERY_BROKER`: `redis://<redis-service-url>:6379/0`
    - `CELERY_RESULT`: `redis://<redis-service-url>:6379/0`
+   - `USE_GUNICORN`: `true`（推奨、本番環境でGunicornを使用）
+   - `GUNICORN_WORKERS`: `2`（オプション、デフォルト: 2）
+   - `GUNICORN_TIMEOUT`: `300`（オプション、デフォルト: 300秒）
+   - `GUNICORN_LOG_LEVEL`: `info`（オプション、デフォルト: info）
+   
+   **注意**: Railway環境では、`RAILWAY_ENVIRONMENT`環境変数が自動的に設定されるため、Gunicornが自動的に使用されます。`USE_GUNICORN`を明示的に設定する必要はありませんが、設定することで確実にGunicornが使用されます。
 
 #### サービス2: Celeryワーカー（重要）
 
