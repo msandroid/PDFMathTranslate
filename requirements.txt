@@ -1,2 +1,4 @@
-pdf2zh[backend]
-
+pdf2zh
+flask
+celery
+redis
