@@ -65,6 +65,11 @@ Railwayでは、**2つのサービス**を作成する必要があります：
      - 例: `redis://redis-production.up.railway.internal:6379/0`
    - **Name**: `CELERY_RESULT`
    - **Value**: `redis://<redis-host>:6379/0`（CELERY_BROKERと同じ値）
+   - **Name**: `CELERY_WORKER_CONCURRENCY`（推奨）
+   - **Value**: `2`（デフォルト値）
+     - Railwayなどのクラウド環境では、メモリ制限があるため`2`が推奨されます
+     - より多くのメモリがある場合は、`4`や`8`に増やすことができます
+     - デフォルト値（未設定時）は`2`です
 
 **重要**: 
 - APIサーバーとCeleryワーカーは**同じRedisインスタンス**に接続する必要があります
@@ -85,12 +90,23 @@ RailwayのRedisプラグインを使用するか、別のRedisサービスを使
 
 各サービスで以下の環境変数を設定します：
 
+**APIサーバーサービス:**
 ```
 CELERY_BROKER=redis://<redis-host>:6379/0
 CELERY_RESULT=redis://<redis-host>:6379/0
 ```
 
-**重要**: Redisサービスの内部URLを使用してください。Railwayでは、サービス間の通信には内部URLを使用します。
+**Celeryワーカーサービス:**
+```
+CELERY_BROKER=redis://<redis-host>:6379/0
+CELERY_RESULT=redis://<redis-host>:6379/0
+CELERY_WORKER_CONCURRENCY=2
+```
+
+**重要**: 
+- Redisサービスの内部URLを使用してください。Railwayでは、サービス間の通信には内部URLを使用します。
+- `CELERY_WORKER_CONCURRENCY`は、ワーカーが同時に処理するタスクの数を制御します。Railwayなどのクラウド環境では、メモリ制限があるため`2`が推奨されます。デフォルト値は`2`です（未設定時）。
+- より多くのメモリがある場合は、`4`や`8`に増やすことができますが、メモリ不足で再起動が発生する可能性があります。
 
 ### 4. Celeryワーカーサービスの確認
 
@@ -283,6 +299,51 @@ curl https://<your-railway-app-url>/health
   - **解決方法**: 
     - 最新のコードに更新してください（この問題は修正済みです）
     - または、Start Commandを`pdf2zh --celery worker`のみにして、Celeryのオプションは環境変数で設定
+
+### セキュリティ警告（root権限で実行）
+
+**症状**:
+- ログに以下のような警告が表示される：
+  ```
+  SecurityWarning: You're running the worker with superuser privileges: this is
+  absolutely not recommended!
+  Please specify a different user using the --uid option.
+  User information: uid=0 euid=0 gid=0 egid=0
+  ```
+
+**原因**:
+- Dockerコンテナ内でCeleryワーカーがroot権限（uid=0）で実行されている
+- これはセキュリティ上の警告ですが、Dockerコンテナ内では一般的な動作です
+
+**解決方法**:
+- **この警告は無視して問題ありません**。Dockerコンテナ内では、root権限で実行されることが一般的です。
+- Railwayなどのクラウド環境では、コンテナが分離されているため、セキュリティ上のリスクは低いです。
+- 警告を抑制したい場合は、Celeryの設定で`worker_disable_rate_limits=True`を設定するか、環境変数で`CELERYD_FORCE_EXECV=true`を設定することもできますが、通常は必要ありません。
+
+### ワーカーが定期的に再起動する
+
+**症状**:
+- ログを見ると、20秒ごと程度にワーカーが再起動しているように見える
+- `concurrency: 48`などの高い並行度が設定されている
+
+**原因**:
+- デフォルトの並行度（concurrency）が高すぎて、メモリ不足が発生している
+- Railwayなどのクラウド環境では、メモリ制限があるため、高い並行度は推奨されません
+
+**解決方法**:
+1. 環境変数`CELERY_WORKER_CONCURRENCY`を設定して、並行度を下げる：
+   - **推奨値**: `2`（Railwayなどのクラウド環境）
+   - **メモリに余裕がある場合**: `4`や`8`に増やすことも可能
+2. ワーカーサービスの「Settings」→「Variables」で以下を追加：
+   - **Name**: `CELERY_WORKER_CONCURRENCY`
+   - **Value**: `2`
+3. サービスを再デプロイして、ログを確認：
+   - 再起動が止まり、安定して動作することを確認
+   - ログに`concurrency: 2`と表示されることを確認
+
+**注意**: 
+- 並行度を上げすぎると、メモリ不足で再起動が発生する可能性があります
+- Railwayの無料プランでは、メモリ制限が厳しいため、`2`が推奨されます
 
 ### Redis接続エラー
 
@@ -487,4 +548,5 @@ Railway Project
 - [Railway Documentation](https://docs.railway.app/)
 - [Celery Documentation](https://docs.celeryq.dev/)
 - [Railway Networking](https://docs.railway.app/networking/private-networking)
+
 

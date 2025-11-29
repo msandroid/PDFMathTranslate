@@ -5,10 +5,16 @@ from pdf2zh import translate_stream
 import tqdm
 import json
 import io
+import os
 from pdf2zh.doclayout import ModelInstance
 from pdf2zh.config import ConfigManager
 
 flask_app = Flask("pdf2zh")
+
+# Celeryワーカーの並行度を環境変数から取得（デフォルトは2、Railway推奨）
+# Railwayなどのクラウド環境では、メモリ制限があるため低めの値が推奨されます
+worker_concurrency = int(os.environ.get("CELERY_WORKER_CONCURRENCY", "2"))
+
 flask_app.config.from_mapping(
     CELERY=dict(
         broker_url=ConfigManager.get("CELERY_BROKER", "redis://127.0.0.1:6379/0"),
@@ -17,6 +23,7 @@ flask_app.config.from_mapping(
         task_acks_late=True,
         worker_max_tasks_per_child=1000,
         worker_disable_rate_limits=False,
+        worker_concurrency=worker_concurrency,
     )
 )
 
