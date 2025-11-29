@@ -1,0 +1,7 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "pip install -e .[backend]"
+
+[deploy]
+startCommand = "pdf2zh --celery worker --loglevel=info"
+
