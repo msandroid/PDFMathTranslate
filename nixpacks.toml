@@ -3,7 +3,7 @@ nixPkgs = ["python312", "pip"]
 
 [phases.install]
 cmds = [
-  "pip install -e .[backend]",
+  "pip install .[backend]",
   "pip install -U babeldoc<0.3.0 pymupdf<1.25.3 pdfminer-six==20250416"
 ]
 

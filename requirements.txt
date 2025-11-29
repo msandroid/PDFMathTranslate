@@ -1,6 +1,6 @@
-# For Railway/Nixpacks: use "pip install -e .[backend]" instead
+# For Railway/Nixpacks: use "pip install .[backend]" instead
 # This file is kept for compatibility with other deployment methods
--e .[backend]
+.[backend]
 flask>=3.0.0
 celery>=5.3.0
 redis>=5.0.0
