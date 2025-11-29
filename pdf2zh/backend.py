@@ -31,6 +31,13 @@ def handle_file_too_large(e):
 # Railwayなどのクラウド環境では、メモリ制限があるため低めの値が推奨されます
 worker_concurrency = int(os.environ.get("CELERY_WORKER_CONCURRENCY", "2"))
 
+# タスクのタイムアウト設定（秒）
+# Railwayなどのクラウド環境では、リソース制限があるため適切なタイムアウト設定が必要
+# soft_time_limit: タスクがこの時間を超えるとSoftTimeLimitExceeded例外が発生（クリーンアップ可能）
+# time_limit: タスクがこの時間を超えると強制終了（SIGKILL）
+TASK_SOFT_TIME_LIMIT = int(os.environ.get("CELERY_TASK_SOFT_TIME_LIMIT", "1800"))  # 30分（デフォルト）
+TASK_TIME_LIMIT = int(os.environ.get("CELERY_TASK_TIME_LIMIT", "2100"))  # 35分（デフォルト、soft_time_limitより長く設定）
+
 # Redis接続URLの構築
 # RailwayではREDISHOST環境変数が自動的に設定される場合がある
 def get_redis_url():
@@ -140,6 +147,8 @@ flask_app.config.from_mapping(
         worker_max_tasks_per_child=1000,
         worker_disable_rate_limits=False,
         worker_concurrency=worker_concurrency,
+        # メモリ制限対策: タスク完了後にメモリを解放
+        worker_max_memory_per_child=int(os.environ.get("CELERY_WORKER_MAX_MEMORY_PER_CHILD", "500000")),  # 500MB（デフォルト）
     )
 )
 
@@ -165,7 +174,18 @@ celery_app = celery_init_app(flask_app)
 @flask_app.route("/", methods=["GET"])
 @flask_app.route("/health", methods=["GET"])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - 高速に応答する必要があるため、シンプルに実装"""
+    # ヘルスチェックはAPIサーバーが起動しているかどうかのみを確認
+    # Celeryワーカーの状態は別のエンドポイント（/health/workers）で確認可能
+    return {
+        "status": "ok",
+        "service": "pdf2zh-api"
+    }, 200
+
+
+@flask_app.route("/health/workers", methods=["GET"])
+def health_check_workers():
+    """Celeryワーカーの状態を確認するエンドポイント（詳細なヘルスチェック用）"""
     try:
         # Celeryワーカーの状態を確認
         inspect = celery_app.control.inspect()
@@ -175,10 +195,11 @@ def health_check():
         return {
             "status": "ok",
             "service": "pdf2zh-api",
-            "workers": worker_status
+            "workers": worker_status,
+            "active_workers": list(active_workers.keys()) if active_workers else []
         }, 200
     except Exception as e:
-        # ワーカーの確認に失敗しても、APIサーバー自体は動作している
+        # ワーカーの確認に失敗した場合
         return {
             "status": "ok",
             "service": "pdf2zh-api",
@@ -187,18 +208,43 @@ def health_check():
         }, 200
 
 
-@celery_app.task(bind=True)
+@celery_app.task(
+    bind=True,
+    soft_time_limit=TASK_SOFT_TIME_LIMIT,
+    time_limit=TASK_TIME_LIMIT,
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 0},  # デフォルトではリトライしない（必要に応じて変更可能）
+    retry_backoff=False,
+)
 def translate_task(
     self: Task,
     stream: bytes,
     args: dict,
 ):
+    import gc
+    import traceback
+    from celery.exceptions import SoftTimeLimitExceeded
+    
     print(f"DEBUG [Celery Worker]: translate_task started, task_id={self.request.id}")
     print(f"DEBUG [Celery Worker]: stream size={len(stream)} bytes, args={args}")
+    print(f"DEBUG [Celery Worker]: soft_time_limit={TASK_SOFT_TIME_LIMIT}s, time_limit={TASK_TIME_LIMIT}s")
     
     def progress_bar(t: tqdm.tqdm):
         self.update_state(state="PROGRESS", meta={"n": t.n, "total": t.total})  # noqa
         print(f"DEBUG [Celery Worker]: Translating {t.n} / {t.total} pages")
+
+    try:
+        # メモリ使用量を監視（オプション）
+        import psutil
+        import os as os_module
+        process = psutil.Process(os_module.getpid())
+        initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+        print(f"DEBUG [Celery Worker]: Initial memory usage: {initial_memory:.2f} MB")
+    except ImportError:
+        # psutilが利用できない場合はスキップ
+        pass
+    except Exception as e:
+        print(f"WARNING [Celery Worker]: Could not monitor memory: {e}")
 
     try:
         doc_mono, doc_dual = translate_stream(
@@ -207,10 +253,41 @@ def translate_task(
             model=ModelInstance.value,
             **args,
         )
+        
+        # メモリ使用量を確認（オプション）
+        try:
+            final_memory = process.memory_info().rss / 1024 / 1024  # MB
+            print(f"DEBUG [Celery Worker]: Final memory usage: {final_memory:.2f} MB")
+        except:
+            pass
+        
         print(f"DEBUG [Celery Worker]: Translation completed successfully, task_id={self.request.id}")
+        
+        # 明示的にガベージコレクションを実行してメモリを解放
+        gc.collect()
+        
         return doc_mono, doc_dual
+    except SoftTimeLimitExceeded:
+        # ソフトタイムアウト: クリーンアップ可能
+        error_msg = f"Task exceeded soft time limit ({TASK_SOFT_TIME_LIMIT}s)"
+        print(f"ERROR [Celery Worker]: {error_msg}, task_id={self.request.id}")
+        # メモリを解放
+        gc.collect()
+        raise Exception(error_msg)
+    except MemoryError as e:
+        # メモリ不足エラー
+        error_msg = f"Memory error during translation: {str(e)}"
+        print(f"ERROR [Celery Worker]: {error_msg}, task_id={self.request.id}")
+        # メモリを解放
+        gc.collect()
+        raise Exception(error_msg)
     except Exception as e:
-        print(f"ERROR [Celery Worker]: Translation failed, task_id={self.request.id}, error={str(e)}")
+        # その他のエラー
+        error_msg = f"Translation failed: {str(e)}"
+        print(f"ERROR [Celery Worker]: {error_msg}, task_id={self.request.id}")
+        print(f"ERROR [Celery Worker]: Traceback:\n{traceback.format_exc()}")
+        # メモリを解放
+        gc.collect()
         raise
 
 

@@ -76,6 +76,18 @@ Railwayでは、**2つのサービス**を作成する必要があります：
      - Railwayなどのクラウド環境では、メモリ制限があるため`2`が推奨されます
      - より多くのメモリがある場合は、`4`や`8`に増やすことができます
      - デフォルト値（未設定時）は`2`です
+   - **Name**: `CELERY_TASK_SOFT_TIME_LIMIT`（オプション）
+   - **Value**: `1800`（デフォルト: 30分）
+     - タスクのソフトタイムアウト（秒）。この時間を超えるとクリーンアップ可能な例外が発生します
+     - 大きなPDFファイルを処理する場合は、この値を増やすことを検討してください
+   - **Name**: `CELERY_TASK_TIME_LIMIT`（オプション）
+   - **Value**: `2100`（デフォルト: 35分）
+     - タスクのハードタイムアウト（秒）。この時間を超えるとタスクが強制終了されます
+     - `CELERY_TASK_SOFT_TIME_LIMIT`より長く設定する必要があります
+   - **Name**: `CELERY_WORKER_MAX_MEMORY_PER_CHILD`（オプション）
+   - **Value**: `500000`（デフォルト: 500MB）
+     - ワーカープロセスあたりの最大メモリ使用量（KB）。この値を超えるとワーカーが再起動されます
+     - メモリ不足でタスクが失敗する場合は、この値を増やすことを検討してください
 
 **重要**: 
 - APIサーバーとCeleryワーカーは**同じRedisインスタンス**に接続する必要があります
@@ -96,23 +108,47 @@ RailwayのRedisプラグインを使用するか、別のRedisサービスを使
 
 各サービスで以下の環境変数を設定します：
 
-**APIサーバーサービス:**
+#### APIサーバーサービス
+
+**役割**: HTTPリクエストを受け取り、翻訳タスクを作成・管理する
+
+**必要な環境変数**:
 ```
 CELERY_BROKER=redis://<redis-host>:6379/0
 CELERY_RESULT=redis://<redis-host>:6379/0
 ```
 
-**Celeryワーカーサービス:**
+**説明**:
+- APIサーバーはタスクを作成するだけで、実際の翻訳処理は行いません
+- そのため、タイムアウト設定やワーカー関連の設定は不要です
+- Redis接続情報のみが必要です
+
+#### Celeryワーカーサービス
+
+**役割**: 実際の翻訳処理を実行する
+
+**必要な環境変数**:
 ```
 CELERY_BROKER=redis://<redis-host>:6379/0
 CELERY_RESULT=redis://<redis-host>:6379/0
-CELERY_WORKER_CONCURRENCY=2
+CELERY_WORKER_CONCURRENCY=2  # 推奨: 2（Railwayなどのクラウド環境）
+CELERY_TASK_SOFT_TIME_LIMIT=1800  # オプション: 30分（デフォルト）
+CELERY_TASK_TIME_LIMIT=2100  # オプション: 35分（デフォルト）
+CELERY_WORKER_MAX_MEMORY_PER_CHILD=500000  # オプション: 500MB（デフォルト）
 ```
+
+**説明**:
+- ワーカーサービスは実際に翻訳タスクを実行するため、以下の設定が必要です：
+  - `CELERY_WORKER_CONCURRENCY`: 同時に処理するタスク数（デフォルト: 2）
+  - `CELERY_TASK_SOFT_TIME_LIMIT`: タスクのソフトタイムアウト（秒）
+  - `CELERY_TASK_TIME_LIMIT`: タスクのハードタイムアウト（秒）
+  - `CELERY_WORKER_MAX_MEMORY_PER_CHILD`: ワーカープロセスあたりの最大メモリ（KB）
 
 **重要**: 
 - Redisサービスの内部URLを使用してください。Railwayでは、サービス間の通信には内部URLを使用します。
 - `CELERY_WORKER_CONCURRENCY`は、ワーカーが同時に処理するタスクの数を制御します。Railwayなどのクラウド環境では、メモリ制限があるため`2`が推奨されます。デフォルト値は`2`です（未設定時）。
 - より多くのメモリがある場合は、`4`や`8`に増やすことができますが、メモリ不足で再起動が発生する可能性があります。
+- **タイムアウト設定はワーカーサービスでのみ有効**です。APIサーバーで設定しても意味がありません（タスクを実行しないため）。
 
 ### 4. Celeryワーカーサービスの確認
 
@@ -443,6 +479,58 @@ curl https://<your-railway-app-url>/health
      ```
    - 接続エラーが続く場合、ホスト名を再度確認して修正
 
+### ヘルスチェックが失敗する
+
+**症状**:
+- Railwayのデプロイログに`Healthcheck failed!`が表示される
+- `1/1 replicas never became healthy!`というエラーメッセージが表示される
+- ログ例: `Attempt #1 failed with service unavailable. Continuing to retry for 1m29s`
+
+**原因**:
+- APIサーバーの起動に時間がかかっている（モデルの読み込みなど）
+- ポートが正しく設定されていない
+- 起動時にエラーが発生している
+- ヘルスチェックのタイムアウトが短すぎる
+
+**解決方法**:
+
+1. **起動ログの確認**:
+   - RailwayダッシュボードでAPIサーバーサービスの「Logs」タブを確認
+   - 起動時のエラーメッセージがないか確認
+   - `Starting Flask application on port...`や`Starting Gunicorn server...`などのログが表示されているか確認
+
+2. **ポート設定の確認**:
+   - Railwayは自動的に`PORT`環境変数を設定します
+   - 環境変数`PORT`が設定されているか確認（通常は自動設定されるため、手動設定は不要）
+   - コードでは`PORT`環境変数が設定されていない場合、デフォルトで`11008`が使用されます
+
+3. **ヘルスチェックエンドポイントの確認**:
+   - ヘルスチェックエンドポイントは`/health`です
+   - Railwayのデフォルトのヘルスチェック設定を使用している場合、自動的に`/health`が使用されます
+   - 手動で設定する場合: 「Settings」→「Networking」→「Healthcheck Path」を`/health`に設定
+
+4. **起動時間の確認**:
+   - モデルの読み込みなどで起動に時間がかかる場合があります
+   - Railwayのデフォルトのヘルスチェックタイムアウトは1分40秒です
+   - 起動に時間がかかる場合は、Railwayの「Settings」→「Networking」でヘルスチェックのタイムアウトを延長できます
+
+5. **シンプルなヘルスチェックの使用**:
+   - `/health`エンドポイントは、APIサーバーが起動しているかどうかのみを確認します（高速に応答）
+   - Celeryワーカーの状態を確認する場合は、`/health/workers`エンドポイントを使用します
+
+6. **環境変数の確認**:
+   - `CELERY_BROKER`と`CELERY_RESULT`が正しく設定されているか確認
+   - Redis接続エラーが発生している場合、起動に失敗する可能性があります
+
+**確認コマンド**（ローカル環境でテストする場合）:
+```bash
+# ヘルスチェック
+curl http://localhost:11008/health
+
+# ワーカーの状態確認
+curl http://localhost:11008/health/workers
+```
+
 ### メモリ不足エラー
 
 **症状**:
@@ -461,11 +549,68 @@ curl https://<your-railway-app-url>/health
 
 3. **同時実行数の制限**:
    - Celeryワーカーの同時実行数を制限することで、メモリ使用量を減らせます
-   - Start Commandを以下に変更：
-     ```
-     pdf2zh --celery worker --loglevel=info --concurrency=1
-     ```
+   - 環境変数`CELERY_WORKER_CONCURRENCY`を`2`または`1`に設定
    - **注意**: `--concurrency`オプションはCeleryに直接渡されます
+
+4. **メモリ制限の設定**:
+   - 環境変数`CELERY_WORKER_MAX_MEMORY_PER_CHILD`を設定して、ワーカープロセスあたりの最大メモリ使用量を制限
+   - 例: `500000`（500MB）
+   - この値を超えると、ワーカーが自動的に再起動されます
+
+### タスクが強制終了される（SIGKILLエラー）
+
+**症状**:
+- タスクのステータスが`FAILURE`になる
+- エラーメッセージに`Worker exited prematurely: signal 9 (SIGKILL)`が含まれる
+- タスクは進捗100%まで進むが、完了前に強制終了される
+- ログ例: `{"error":"Worker exited prematurely: signal 9 (SIGKILL) Job: 0.","state":"FAILURE"}`
+
+**原因**:
+- **メモリ不足**: Railwayなどのクラウド環境でメモリ制限を超えた
+- **タイムアウト**: タスクの実行時間が制限を超えた
+- **リソース制限**: Railwayプランのリソース制限に達した
+
+**解決方法**:
+
+1. **タイムアウト設定の調整**:
+   - 環境変数`CELERY_TASK_SOFT_TIME_LIMIT`を設定（デフォルト: 1800秒 = 30分）
+     - 大きなPDFファイルを処理する場合は、この値を増やす
+     - 例: `3600`（60分）
+   - 環境変数`CELERY_TASK_TIME_LIMIT`を設定（デフォルト: 2100秒 = 35分）
+     - `CELERY_TASK_SOFT_TIME_LIMIT`より長く設定する必要があります
+     - 例: `4200`（70分）
+
+2. **メモリ使用量の最適化**:
+   - 環境変数`CELERY_WORKER_CONCURRENCY`を`1`または`2`に設定（デフォルト: 2）
+   - 環境変数`CELERY_WORKER_MAX_MEMORY_PER_CHILD`を設定（デフォルト: 500MB）
+     - メモリ不足が発生する場合は、この値を増やす
+     - 例: `1000000`（1GB）
+
+3. **Railwayプランの確認**:
+   - Railwayのプランで利用可能なメモリとCPUを確認
+   - 必要に応じてプランをアップグレード
+   - ワーカーサービスの「Settings」→「Resources」でリソース制限を確認
+
+4. **PDFファイルサイズの確認**:
+   - 非常に大きなPDFファイル（100MB以上）を処理する場合は、ファイルサイズを確認
+   - 必要に応じて、PDFファイルを分割して処理
+
+5. **ログの確認**:
+   - ワーカーサービスのログで、メモリ使用量やタイムアウトに関する情報を確認
+   - エラーメッセージの詳細を確認して、適切な対策を実施
+
+**環境変数の設定例**:
+```
+CELERY_WORKER_CONCURRENCY=1
+CELERY_TASK_SOFT_TIME_LIMIT=3600
+CELERY_TASK_TIME_LIMIT=4200
+CELERY_WORKER_MAX_MEMORY_PER_CHILD=1000000
+```
+
+**注意**:
+- タイムアウト値を増やしすぎると、Railwayのリソース制限に達する可能性があります
+- メモリ制限を増やしすぎると、Railwayプランの制限を超える可能性があります
+- バランスを取って設定することが重要です
 
 ### ワーカーがタスクを処理しない
 
