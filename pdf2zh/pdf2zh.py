@@ -304,9 +304,14 @@ def main(args: Optional[List[str]] = None) -> int:
         use_gunicorn = os.environ.get("USE_GUNICORN", "false").lower() in ("true", "1", "yes")
         is_production = os.environ.get("RAILWAY_ENVIRONMENT") is not None or os.environ.get("ENVIRONMENT") == "production"
         
+        # Log startup information
+        logger.info(f"Starting Flask application on port {port}")
+        logger.info(f"USE_GUNICORN={use_gunicorn}, is_production={is_production}, RAILWAY_ENVIRONMENT={os.environ.get('RAILWAY_ENVIRONMENT')}")
+        
         if use_gunicorn or is_production:
             try:
                 import gunicorn.app.base
+                logger.info("Using Gunicorn WSGI server")
                 
                 class StandaloneApplication(gunicorn.app.base.BaseApplication):
                     def __init__(self, app, options=None):
@@ -323,11 +328,13 @@ def main(args: Optional[List[str]] = None) -> int:
                         return self.application
                 
                 # Gunicorn configuration
+                workers = int(os.environ.get("GUNICORN_WORKERS", "2"))
+                timeout = int(os.environ.get("GUNICORN_TIMEOUT", "300"))
                 options = {
                     "bind": f"0.0.0.0:{port}",
-                    "workers": int(os.environ.get("GUNICORN_WORKERS", "2")),
+                    "workers": workers,
                     "worker_class": "sync",
-                    "timeout": int(os.environ.get("GUNICORN_TIMEOUT", "300")),  # 5 minutes default
+                    "timeout": timeout,  # 5 minutes default
                     "keepalive": int(os.environ.get("GUNICORN_KEEPALIVE", "5")),
                     "max_requests": int(os.environ.get("GUNICORN_MAX_REQUESTS", "1000")),
                     "max_requests_jitter": int(os.environ.get("GUNICORN_MAX_REQUESTS_JITTER", "100")),
@@ -337,13 +344,22 @@ def main(args: Optional[List[str]] = None) -> int:
                     "loglevel": os.environ.get("GUNICORN_LOG_LEVEL", "info").lower(),
                 }
                 
+                logger.info(f"Gunicorn configuration: {workers} workers, timeout={timeout}s, bind=0.0.0.0:{port}")
+                logger.info("Starting Gunicorn server...")
                 StandaloneApplication(flask_app, options).run()
-            except ImportError:
+            except ImportError as e:
                 # Fallback to Flask dev server if Gunicorn is not available
-                logger.warning("Gunicorn not available, falling back to Flask development server")
+                logger.warning(f"Gunicorn not available ({e}), falling back to Flask development server")
+                flask_app.run(host="0.0.0.0", port=port)
+            except Exception as e:
+                logger.error(f"Failed to start Gunicorn: {e}")
+                import traceback
+                traceback.print_exc()
+                logger.warning("Falling back to Flask development server")
                 flask_app.run(host="0.0.0.0", port=port)
         else:
             # Development mode: use Flask dev server
+            logger.info("Using Flask development server")
             flask_app.run(host="0.0.0.0", port=port)
         return 0
 
