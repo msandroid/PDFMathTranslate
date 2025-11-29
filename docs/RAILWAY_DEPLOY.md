@@ -40,6 +40,8 @@ Railwayでは、**2つのサービス**を作成する必要があります：
 5. 同じリポジトリを選択（APIサーバーと同じリポジトリ）
 6. サービスが作成されたら、サービス名をクリックして設定画面を開く
 
+**重要**: ワーカーサービスは**リポジトリからデプロイするサービス**として追加するだけでOKです。Redisなどの他のサービスを追加する必要はありません（既存のRedisサービスを共有します）。
+
 **ワーカーサービスの設定:**
 
 1. サービス画面の「**Settings**」タブをクリック
@@ -66,8 +68,10 @@ Railwayでは、**2つのサービス**を作成する必要があります：
 
 **重要**: 
 - APIサーバーとCeleryワーカーは**同じRedisインスタンス**に接続する必要があります
+- 環境変数の値は、APIサーバーとCeleryワーカーで**完全に同じ**である必要があります
 - Railwayの内部ネットワークでは、サービス名をホスト名として使用できます
 - Redisサービスの「Settings」→「Networking」で内部ホスト名を確認できます
+- **注意**: `redis.railway.internal`という形式は正しくありません。必ず`<service-name>.up.railway.internal`の形式を使用するか、サービス名を直接使用してください
 
 #### サービス3: Redis（オプション、Railway Redisプラグインを使用する場合）
 
@@ -192,13 +196,32 @@ curl https://<your-railway-app-url>/health
 
 **Redisホスト名の取得方法:**
 
+**重要**: `redis.railway.internal`という形式は正しくありません。必ず以下の方法で正しいホスト名を取得してください。
+
+**方法1: Railwayダッシュボードから取得（推奨）**
+
 1. RailwayダッシュボードでRedisサービスを開く
 2. 「**Settings**」タブをクリック
 3. 「**Networking**」セクションを開く
 4. 「**Private Networking**」のホスト名を確認
-   - 例: `redis-production.up.railway.internal`
+   - 正しい形式の例: `redis-production.up.railway.internal`
+   - または: `<service-name>.up.railway.internal`
 5. このホスト名を使用して、環境変数の値を設定
    - 例: `redis://redis-production.up.railway.internal:6379/0`
+
+**方法2: サービス名を使用（同じプロジェクト内の場合）**
+
+同じRailwayプロジェクト内のサービス間では、サービス名を直接ホスト名として使用できる場合があります。
+
+1. Redisサービスの名前を確認（例: `redis`、`redis-production`）
+2. 環境変数に`redis://<service-name>:6379/0`を設定
+   - 例: `redis://redis:6379/0`
+   - 例: `redis://redis-production:6379/0`
+
+**注意事項**:
+- `redis.railway.internal`という形式は使用しないでください（動作しません）
+- 必ず`redis://`で始まり、`:6379/0`で終わる形式にしてください
+- ホスト名にポート番号を含めないでください（URLの形式で指定します）
 
 **重要**: 
 - APIサーバーとCeleryワーカーは**同じRedisインスタンス**を使用する必要があります
@@ -265,7 +288,13 @@ curl https://<your-railway-app-url>/health
 
 **症状**:
 - ワーカーのログに`Connection refused`や`Name or service not known`などのエラーが表示される
+- エラーメッセージ例: `Error -2 connecting to redis.railway.internal:6379. Name or service not known.`
 - タスクが作成されても処理されない
+
+**原因**:
+- Redisサービスのホスト名が正しく設定されていない
+- 環境変数に間違ったホスト名が設定されている
+- Railwayの内部DNS名の形式が間違っている
 
 **解決方法**:
 
@@ -273,20 +302,62 @@ curl https://<your-railway-app-url>/health
    - RailwayダッシュボードでRedisサービスが起動しているか確認
    - Redisサービスの「Logs」タブでエラーがないか確認
 
-2. **環境変数の確認**:
+2. **正しいホスト名の取得方法**:
+   
+   **方法A: Railwayダッシュボードから取得（推奨）**
+   
+   1. RailwayダッシュボードでRedisサービスを開く
+   2. 「**Settings**」タブをクリック
+   3. 「**Networking**」セクションを開く
+   4. 「**Private Networking**」のホスト名を確認
+      - 正しい形式の例: `redis-production.up.railway.internal`
+      - または: `<service-name>.up.railway.internal`
+   5. このホスト名を使用して環境変数を設定
+      - 例: `redis://redis-production.up.railway.internal:6379/0`
+   
+   **方法B: 環境変数から取得**
+   
+   RailwayのRedisサービスでは、`REDIS_URL`という環境変数が自動的に設定される場合があります。
+   
+   1. Redisサービスの「Settings」→「Variables」を確認
+   2. `REDIS_URL`または`REDISHOST`などの環境変数を確認
+   3. その値からホスト名を抽出
+   
+   **方法C: サービス名を使用（同じプロジェクト内の場合）**
+   
+   同じRailwayプロジェクト内のサービス間では、サービス名を直接ホスト名として使用できる場合があります。
+   
+   1. Redisサービスの名前を確認（例: `redis`、`redis-production`）
+   2. 環境変数に`redis://<service-name>:6379/0`を設定
+      - 例: `redis://redis:6379/0`
+      - 例: `redis://redis-production:6379/0`
+   
+   **注意**: `redis.railway.internal`という形式は正しくありません。必ず上記の方法で正しいホスト名を取得してください。
+
+3. **環境変数の確認と修正**:
    - ワーカーサービスの「Settings」→「Variables」で以下を確認：
      - `CELERY_BROKER`が設定されているか
      - `CELERY_RESULT`が設定されているか
      - 値の形式が正しいか（`redis://<host>:6379/0`）
+   - **間違った例**: `redis://redis.railway.internal:6379/0`（この形式は動作しません）
+   - **正しい例**: `redis://redis-production.up.railway.internal:6379/0`
+   - または: `redis://redis:6379/0`（サービス名を使用する場合）
 
-3. **ホスト名の確認**:
-   - Redisサービスの「Settings」→「Networking」で内部ホスト名を確認
-   - 環境変数の値にこのホスト名が含まれているか確認
-   - Railwayの内部ネットワークでは、サービス名をホスト名として使用できます
+4. **環境変数の更新手順**:
+   1. ワーカーサービスの「Settings」→「Variables」を開く
+   2. `CELERY_BROKER`と`CELERY_RESULT`の値を確認
+   3. 上記の方法で取得した正しいホスト名を使用して値を更新
+   4. 「Save」をクリック
+   5. サービスが自動的に再デプロイされます
+   6. 「Logs」タブで接続が成功したか確認
 
-4. **接続テスト**:
+5. **接続テスト**:
    - ワーカーサービスのログで、Redisへの接続が成功しているか確認
-   - 接続エラーがある場合、環境変数の値を修正して再デプロイ
+   - 成功した場合、以下のようなログが表示されます：
+     ```
+     [INFO] celery@xxxxx ready.
+     ```
+   - 接続エラーが続く場合、ホスト名を再度確認して修正
 
 ### メモリ不足エラー
 
@@ -367,15 +438,21 @@ Railway Project
 既存のプロジェクトにワーカーサービスを追加する場合の最小設定：
 
 1. **サービス追加**: 「+ New」→「Service」→ 同じリポジトリを選択
+   - **注意**: リポジトリからデプロイするサービスとして追加するだけでOKです
+   - Redisなどの他のサービスを追加する必要はありません（既存のRedisを共有）
 2. **Start Command**: `pdf2zh --celery worker --loglevel=info`
    - **注意**: `--loglevel`、`--concurrency`などのCeleryオプションは、`pdf2zh`コマンドが自動的にCeleryに渡します
 3. **環境変数**:
-   - `CELERY_BROKER`: `redis://<redis-host>:6379/0`
-   - `CELERY_RESULT`: `redis://<redis-host>:6379/0`
+   - `CELERY_BROKER`: `redis://<redis-host>:6379/0`（APIサーバーと同じ値）
+   - `CELERY_RESULT`: `redis://<redis-host>:6379/0`（APIサーバーと同じ値）
 
 **最小構成（Celeryオプションなし）**:
 - Start Command: `pdf2zh --celery worker`
 - これでも動作しますが、ログレベルはデフォルトになります
+
+**Redisサービスについて**:
+- Redisサービスが既に存在する場合（APIサーバー用に作成済み）: 追加不要、既存のRedisを共有
+- Redisサービスが存在しない場合: 「+ New」→「Database」→「Add Redis」で追加が必要
 
 ### 確認チェックリスト
 

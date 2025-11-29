@@ -1,0 +1,14 @@
+[phases.setup]
+nixPkgs = ["python312", "pip"]
+
+[phases.install]
+cmds = [
+  "pip install -e .[backend]"
+]
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "pdf2zh --celery worker --loglevel=info"
+

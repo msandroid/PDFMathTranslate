@@ -343,12 +343,36 @@ PDFMathTranslate can run as MCP server. To use this, you need to run `uv pip ins
                 "pdf2zh",
                 "--mcp"
             ]
+        },
+        "cloudflare-docs": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@cloudflare/mcp-server-cloudflare",
+                "docs-vectorize"
+            ],
+            "env": {
+                "CLOUDFLARE_ACCOUNT_ID": "your-account-id",
+                "CLOUDFLARE_API_TOKEN": "your-api-token",
+                "VECTORIZE_INDEX_NAME": "your-index-name"
+            }
         }
     }
 }
 ```
 
 [filesystem](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem) is a reuqired mcp server to find pdf file, and `translate_pdf` is our mcp server.
+
+[Cloudflare MCP Server](https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-vectorize) provides access to Cloudflare documentation through vectorized search. To use it, you need:
+
+1. A Cloudflare account with API access
+2. A Vectorize index created in your Cloudflare account
+3. Set the environment variables in the configuration:
+   - `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare account ID (found in your Cloudflare dashboard)
+   - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token with appropriate permissions (create one at [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens))
+   - `VECTORIZE_INDEX_NAME`: The name of your Vectorize index
+
+For more information on setting up the Cloudflare MCP server, visit the [official repository](https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-vectorize).
 
 To test if the mcp server works, you can open claude desktop and tell
 

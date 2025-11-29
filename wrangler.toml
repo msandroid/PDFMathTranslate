@@ -1,0 +1,13 @@
+# Cloudflare Pages configuration
+# Note: This project is a Gradio-based Python application
+# and may not work directly with Cloudflare Pages.
+# Consider using Render, Koyeb, or Zeabur instead.
+
+name = "pdf2zh"
+compatibility_date = "2025-11-28"
+
+# Disable automatic deployment
+# Set deploy command to empty in Cloudflare Pages dashboard
+# or use: build command = "pip install ."
+# deploy command = "" (leave empty)
+
