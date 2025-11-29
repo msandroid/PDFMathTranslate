@@ -18,7 +18,22 @@ worker_concurrency = int(os.environ.get("CELERY_WORKER_CONCURRENCY", "2"))
 # Redis接続URLの構築
 # RailwayではREDISHOST環境変数が自動的に設定される場合がある
 def get_redis_url():
-    # REDISHOST環境変数が存在する場合、それを優先して使用（Railwayの自動設定）
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # 優先順位1: REDIS_URL環境変数（Railwayが自動設定する場合がある）
+    redis_url = os.environ.get("REDIS_URL")
+    if redis_url:
+        logger.info(f"Using REDIS_URL environment variable: redis://***@{redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
+        return redis_url
+    
+    # 優先順位2: CELERY_BROKER環境変数が明示的に設定されている場合、それを使用
+    broker = ConfigManager.get("CELERY_BROKER")
+    if broker and broker != "redis://127.0.0.1:6379/0":
+        logger.info(f"Using CELERY_BROKER from config: redis://***@{broker.split('@')[-1] if '@' in broker else broker}")
+        return broker
+    
+    # 優先順位3: REDISHOST環境変数が存在する場合、それを使用（Railwayの自動設定）
     redis_host = os.environ.get("REDISHOST")
     if redis_host:
         redis_port = os.environ.get("REDISPORT", "6379")
@@ -26,16 +41,20 @@ def get_redis_url():
         redis_db = os.environ.get("REDISDB", "0")
         
         if redis_password:
-            return f"redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
+            url = f"redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
         else:
-            return f"redis://{redis_host}:{redis_port}/{redis_db}"
+            url = f"redis://{redis_host}:{redis_port}/{redis_db}"
+        logger.info(f"Using REDISHOST environment variable: redis://***@{redis_host}:{redis_port}/{redis_db}")
+        return url
     
-    # CELERY_BROKER環境変数が明示的に設定されている場合、それを使用
-    broker = ConfigManager.get("CELERY_BROKER")
-    if broker and broker != "redis://127.0.0.1:6379/0":
-        return broker
+    # 優先順位4: CELERY_RESULT環境変数（フォールバック）
+    result = ConfigManager.get("CELERY_RESULT")
+    if result and result != "redis://127.0.0.1:6379/0":
+        logger.info(f"Using CELERY_RESULT from config: redis://***@{result.split('@')[-1] if '@' in result else result}")
+        return result
     
     # デフォルト値
+    logger.warning("No Redis URL configured, using default: redis://127.0.0.1:6379/0")
     return "redis://127.0.0.1:6379/0"
 
 redis_url = get_redis_url()

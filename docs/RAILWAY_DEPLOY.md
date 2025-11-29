@@ -376,13 +376,27 @@ curl https://<your-railway-app-url>/health
    5. このホスト名を使用して環境変数を設定
       - 例: `redis://redis-production.up.railway.internal:6379/0`
    
-   **方法B: 環境変数から取得**
+   **方法B: 環境変数から取得（推奨）**
    
    RailwayのRedisサービスでは、`REDIS_URL`という環境変数が自動的に設定される場合があります。
    
+   **重要**: アプリケーションは以下の優先順位でRedis接続URLを決定します：
+   1. `REDIS_URL`環境変数（最優先）
+   2. `CELERY_BROKER`環境変数
+   3. `REDISHOST`環境変数（`REDISPORT`、`REDISPASSWORD`、`REDISDB`と組み合わせ）
+   4. `CELERY_RESULT`環境変数（フォールバック）
+   5. デフォルト値（`redis://127.0.0.1:6379/0`）
+   
+   **推奨設定**:
+   - RailwayのRedisサービスが`REDIS_URL`環境変数を自動設定する場合、それをそのまま使用できます
+   - ワーカーサービスの「Settings」→「Variables」で`REDIS_URL`環境変数を確認
+   - 存在する場合、`CELERY_BROKER`と`CELERY_RESULT`の両方に同じ値を設定
+   
+   **手動設定の場合**:
    1. Redisサービスの「Settings」→「Variables」を確認
    2. `REDIS_URL`または`REDISHOST`などの環境変数を確認
    3. その値からホスト名を抽出
+   4. ワーカーサービスの`CELERY_BROKER`と`CELERY_RESULT`に設定
    
    **方法C: サービス名を使用（同じプロジェクト内の場合）**
    
@@ -397,12 +411,15 @@ curl https://<your-railway-app-url>/health
 
 3. **環境変数の確認と修正**:
    - ワーカーサービスの「Settings」→「Variables」で以下を確認：
+     - `REDIS_URL`が設定されているか（最優先、Railwayが自動設定する場合がある）
      - `CELERY_BROKER`が設定されているか
      - `CELERY_RESULT`が設定されているか
      - 値の形式が正しいか（`redis://<host>:6379/0`）
+   - **推奨**: `REDIS_URL`環境変数が存在する場合、それを`CELERY_BROKER`と`CELERY_RESULT`の両方に設定
    - **間違った例**: `redis://redis.railway.internal:6379/0`（この形式は動作しません）
    - **正しい例**: `redis://redis-production.up.railway.internal:6379/0`
    - または: `redis://redis:6379/0`（サービス名を使用する場合）
+   - **注意**: `redis.up.railway.internal`のような不完全なホスト名はDNS解決に失敗する可能性があります。必ず完全なホスト名（`<service-name>.up.railway.internal`）を使用してください
 
 4. **環境変数の更新手順**:
    1. ワーカーサービスの「Settings」→「Variables」を開く
