@@ -13,6 +13,10 @@ flask_app.config.from_mapping(
     CELERY=dict(
         broker_url=ConfigManager.get("CELERY_BROKER", "redis://127.0.0.1:6379/0"),
         result_backend=ConfigManager.get("CELERY_RESULT", "redis://127.0.0.1:6379/0"),
+        worker_prefetch_multiplier=1,
+        task_acks_late=True,
+        worker_max_tasks_per_child=1000,
+        worker_disable_rate_limits=False,
     )
 )
 
@@ -48,36 +52,66 @@ def translate_task(
     stream: bytes,
     args: dict,
 ):
+    print(f"DEBUG [Celery Worker]: translate_task started, task_id={self.request.id}")
+    print(f"DEBUG [Celery Worker]: stream size={len(stream)} bytes, args={args}")
+    
     def progress_bar(t: tqdm.tqdm):
         self.update_state(state="PROGRESS", meta={"n": t.n, "total": t.total})  # noqa
-        print(f"Translating {t.n} / {t.total} pages")
+        print(f"DEBUG [Celery Worker]: Translating {t.n} / {t.total} pages")
 
-    doc_mono, doc_dual = translate_stream(
-        stream,
-        callback=progress_bar,
-        model=ModelInstance.value,
-        **args,
-    )
-    return doc_mono, doc_dual
+    try:
+        doc_mono, doc_dual = translate_stream(
+            stream,
+            callback=progress_bar,
+            model=ModelInstance.value,
+            **args,
+        )
+        print(f"DEBUG [Celery Worker]: Translation completed successfully, task_id={self.request.id}")
+        return doc_mono, doc_dual
+    except Exception as e:
+        print(f"ERROR [Celery Worker]: Translation failed, task_id={self.request.id}, error={str(e)}")
+        raise
 
 
 @flask_app.route("/v1/translate", methods=["POST"])
 def create_translate_tasks():
     file = request.files["file"]
     stream = file.stream.read()
-    print(request.form.get("data"))
+    print(f"DEBUG [Backend]: Received file, size={len(stream)} bytes")
+    print(f"DEBUG [Backend]: Form data: {request.form.get('data')}")
     args = json.loads(request.form.get("data"))
+    print(f"DEBUG [Backend]: Translation args: {args}")
     task = translate_task.delay(stream, args)
+    print(f"DEBUG [Backend]: Task created with id={task.id}")
     return {"id": task.id}
 
 
 @flask_app.route("/v1/translate/<id>", methods=["GET"])
 def get_translate_task(id: str):
     result: AsyncResult = celery_app.AsyncResult(id)
-    if str(result.state) == "PROGRESS":
-        return {"state": str(result.state), "info": result.info}
+    state = str(result.state)
+    print(f"DEBUG [Backend]: Task status check - id={id}, state={state}")
+    
+    # Check if worker is actually running by inspecting the broker
+    if state == "PENDING":
+        try:
+            # Check if task is in the queue
+            inspect = celery_app.control.inspect()
+            active_tasks = inspect.active()
+            scheduled_tasks = inspect.scheduled()
+            reserved_tasks = inspect.reserved()
+            
+            if active_tasks or scheduled_tasks or reserved_tasks:
+                print(f"DEBUG [Backend]: Workers are active. Active: {active_tasks}, Scheduled: {scheduled_tasks}, Reserved: {reserved_tasks}")
+            else:
+                print(f"WARNING [Backend]: No active workers detected! Task {id} may never be processed.")
+        except Exception as e:
+            print(f"WARNING [Backend]: Could not inspect workers: {e}")
+    
+    if state == "PROGRESS":
+        return {"state": state, "info": result.info}
     else:
-        return {"state": str(result.state)}
+        return {"state": state}
 
 
 @flask_app.route("/v1/translate/<id>", methods=["DELETE"])

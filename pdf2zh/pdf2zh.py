@@ -202,8 +202,12 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_args(args: Optional[List[str]]) -> argparse.Namespace:
-    parsed_args = create_parser().parse_args(args=args)
+def parse_args(args: Optional[List[str]], known_only: bool = False) -> argparse.Namespace:
+    parser = create_parser()
+    if known_only:
+        parsed_args, _ = parser.parse_known_args(args=args)
+    else:
+        parsed_args = parser.parse_args(args=args)
 
     if parsed_args.pages:
         pages = []
@@ -258,7 +262,15 @@ def main(args: Optional[List[str]] = None) -> int:
     logging.getLogger("http11").setLevel("CRITICAL")
     logging.getLogger("http11").propagate = False
 
-    parsed_args = parse_args(args)
+    # Check if --celery is in args first to use parse_known_args
+    # This allows Celery-specific arguments to be passed through
+    use_known_args = False
+    if args is None:
+        use_known_args = "--celery" in sys.argv[1:]
+    else:
+        use_known_args = "--celery" in args
+    
+    parsed_args = parse_args(args, known_only=use_known_args)
 
     if parsed_args.config:
         ConfigManager.custome_config(parsed_args.config)
