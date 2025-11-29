@@ -43,7 +43,25 @@ celery_app = celery_init_app(flask_app)
 @flask_app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint"""
-    return {"status": "ok", "service": "pdf2zh-api"}, 200
+    try:
+        # Celeryワーカーの状態を確認
+        inspect = celery_app.control.inspect()
+        active_workers = inspect.active()
+        worker_status = "available" if active_workers else "unavailable"
+        
+        return {
+            "status": "ok",
+            "service": "pdf2zh-api",
+            "workers": worker_status
+        }, 200
+    except Exception as e:
+        # ワーカーの確認に失敗しても、APIサーバー自体は動作している
+        return {
+            "status": "ok",
+            "service": "pdf2zh-api",
+            "workers": "unknown",
+            "warning": f"Could not check worker status: {str(e)}"
+        }, 200
 
 
 @celery_app.task(bind=True)
@@ -75,43 +93,129 @@ def translate_task(
 
 @flask_app.route("/v1/translate", methods=["POST"])
 def create_translate_tasks():
-    file = request.files["file"]
-    stream = file.stream.read()
-    print(f"DEBUG [Backend]: Received file, size={len(stream)} bytes")
-    print(f"DEBUG [Backend]: Form data: {request.form.get('data')}")
-    args = json.loads(request.form.get("data"))
-    print(f"DEBUG [Backend]: Translation args: {args}")
-    task = translate_task.delay(stream, args)
-    print(f"DEBUG [Backend]: Task created with id={task.id}")
-    return {"id": task.id}
+    try:
+        # ファイルの存在確認
+        if "file" not in request.files:
+            print(f"ERROR [Backend]: No file in request")
+            return {"status": "error", "code": 400, "message": "No file provided"}, 400
+        
+        file = request.files["file"]
+        if file.filename == "":
+            print(f"ERROR [Backend]: Empty filename")
+            return {"status": "error", "code": 400, "message": "Empty filename"}, 400
+        
+        stream = file.stream.read()
+        if len(stream) == 0:
+            print(f"ERROR [Backend]: Empty file")
+            return {"status": "error", "code": 400, "message": "Empty file"}, 400
+        
+        print(f"DEBUG [Backend]: Received file, size={len(stream)} bytes")
+        
+        # データの存在確認
+        if "data" not in request.form:
+            print(f"ERROR [Backend]: No data in form")
+            return {"status": "error", "code": 400, "message": "No data provided"}, 400
+        
+        data_str = request.form.get("data")
+        print(f"DEBUG [Backend]: Form data: {data_str}")
+        
+        try:
+            args = json.loads(data_str)
+        except json.JSONDecodeError as e:
+            print(f"ERROR [Backend]: Invalid JSON in data: {e}")
+            return {"status": "error", "code": 400, "message": f"Invalid JSON: {str(e)}"}, 400
+        
+        print(f"DEBUG [Backend]: Translation args: {args}")
+        
+        # Celeryワーカーの確認
+        try:
+            inspect = celery_app.control.inspect()
+            active_workers = inspect.active()
+            if active_workers is None:
+                print(f"WARNING [Backend]: No active Celery workers detected")
+                return {
+                    "status": "error",
+                    "code": 503,
+                    "message": "No Celery workers available. Please ensure the worker service is running."
+                }, 503
+        except Exception as e:
+            print(f"WARNING [Backend]: Could not check Celery workers: {e}")
+            # ワーカーの確認に失敗しても続行（接続の問題かもしれない）
+        
+        # タスクの作成
+        try:
+            task = translate_task.delay(stream, args)
+            print(f"DEBUG [Backend]: Task created with id={task.id}")
+            return {"id": task.id}
+        except Exception as e:
+            print(f"ERROR [Backend]: Failed to create task: {e}")
+            return {
+                "status": "error",
+                "code": 500,
+                "message": f"Failed to create translation task: {str(e)}"
+            }, 500
+            
+    except Exception as e:
+        print(f"ERROR [Backend]: Unexpected error in create_translate_tasks: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "code": 500,
+            "message": f"Internal server error: {str(e)}"
+        }, 500
 
 
 @flask_app.route("/v1/translate/<id>", methods=["GET"])
 def get_translate_task(id: str):
-    result: AsyncResult = celery_app.AsyncResult(id)
-    state = str(result.state)
-    print(f"DEBUG [Backend]: Task status check - id={id}, state={state}")
-    
-    # Check if worker is actually running by inspecting the broker
-    if state == "PENDING":
-        try:
-            # Check if task is in the queue
-            inspect = celery_app.control.inspect()
-            active_tasks = inspect.active()
-            scheduled_tasks = inspect.scheduled()
-            reserved_tasks = inspect.reserved()
-            
-            if active_tasks or scheduled_tasks or reserved_tasks:
-                print(f"DEBUG [Backend]: Workers are active. Active: {active_tasks}, Scheduled: {scheduled_tasks}, Reserved: {reserved_tasks}")
-            else:
-                print(f"WARNING [Backend]: No active workers detected! Task {id} may never be processed.")
-        except Exception as e:
-            print(f"WARNING [Backend]: Could not inspect workers: {e}")
-    
-    if state == "PROGRESS":
-        return {"state": state, "info": result.info}
-    else:
-        return {"state": state}
+    try:
+        result: AsyncResult = celery_app.AsyncResult(id)
+        state = str(result.state)
+        print(f"DEBUG [Backend]: Task status check - id={id}, state={state}")
+        
+        # Check if worker is actually running by inspecting the broker
+        if state == "PENDING":
+            try:
+                # Check if task is in the queue
+                inspect = celery_app.control.inspect()
+                active_tasks = inspect.active()
+                scheduled_tasks = inspect.scheduled()
+                reserved_tasks = inspect.reserved()
+                
+                if active_tasks or scheduled_tasks or reserved_tasks:
+                    print(f"DEBUG [Backend]: Workers are active. Active: {active_tasks}, Scheduled: {scheduled_tasks}, Reserved: {reserved_tasks}")
+                else:
+                    print(f"WARNING [Backend]: No active workers detected! Task {id} may never be processed.")
+                    return {
+                        "status": "error",
+                        "code": 503,
+                        "message": "No Celery workers available. Task is pending but no workers are running.",
+                        "state": state
+                    }, 503
+            except Exception as e:
+                print(f"WARNING [Backend]: Could not inspect workers: {e}")
+        
+        if state == "PROGRESS":
+            return {"state": state, "info": result.info}
+        elif state == "FAILURE":
+            error_info = result.info
+            error_message = str(error_info) if error_info else "Unknown error"
+            print(f"ERROR [Backend]: Task {id} failed: {error_message}")
+            return {
+                "state": state,
+                "error": error_message
+            }
+        else:
+            return {"state": state}
+    except Exception as e:
+        print(f"ERROR [Backend]: Error checking task status: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "code": 500,
+            "message": f"Internal server error: {str(e)}"
+        }, 500
 
 
 @flask_app.route("/v1/translate/<id>", methods=["DELETE"])
@@ -123,14 +227,41 @@ def delete_translate_task(id: str):
 
 @flask_app.route("/v1/translate/<id>/<format>")
 def get_translate_result(id: str, format: str):
-    result = celery_app.AsyncResult(id)
-    if not result.ready():
-        return {"error": "task not finished"}, 400
-    if not result.successful():
-        return {"error": "task failed"}, 400
-    doc_mono, doc_dual = result.get()
-    to_send = doc_mono if format == "mono" else doc_dual
-    return send_file(io.BytesIO(to_send), "application/pdf")
+    try:
+        if format not in ["mono", "dual"]:
+            return {"status": "error", "code": 400, "message": "Invalid format. Must be 'mono' or 'dual'"}, 400
+        
+        result = celery_app.AsyncResult(id)
+        if not result.ready():
+            return {
+                "status": "error",
+                "code": 400,
+                "message": "Task not finished yet",
+                "state": str(result.state)
+            }, 400
+        
+        if not result.successful():
+            error_info = result.info
+            error_message = str(error_info) if error_info else "Unknown error"
+            print(f"ERROR [Backend]: Task {id} failed: {error_message}")
+            return {
+                "status": "error",
+                "code": 500,
+                "message": f"Task failed: {error_message}"
+            }, 500
+        
+        doc_mono, doc_dual = result.get()
+        to_send = doc_mono if format == "mono" else doc_dual
+        return send_file(io.BytesIO(to_send), "application/pdf")
+    except Exception as e:
+        print(f"ERROR [Backend]: Error getting translation result: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "code": 500,
+            "message": f"Internal server error: {str(e)}"
+        }, 500
 
 
 if __name__ == "__main__":
