@@ -19,23 +19,69 @@ worker_concurrency = int(os.environ.get("CELERY_WORKER_CONCURRENCY", "2"))
 # RailwayではREDISHOST環境変数が自動的に設定される場合がある
 def get_redis_url():
     import logging
+    import re
     logger = logging.getLogger(__name__)
+    
+    def extract_host_from_url(url):
+        """URLからホスト名を抽出"""
+        if not url:
+            return None
+        # redis://host:port/db または redis://:password@host:port/db の形式からホストを抽出
+        match = re.search(r'@([^:/]+)', url)
+        if match:
+            return match.group(1)
+        match = re.search(r'redis://([^:/]+)', url)
+        if match:
+            return match.group(1)
+        return None
+    
+    def fix_redis_hostname(hostname):
+        """不完全なRedisホスト名を修正"""
+        if not hostname:
+            return hostname
+        
+        # redis.up.railway.internal のような不完全なホスト名を検出
+        # これは redis.<service-name>.up.railway.internal または redis.railway.internal であるべき
+        if hostname == "redis.up.railway.internal":
+            logger.warning(f"Detected incomplete hostname: {hostname}")
+            logger.warning("This hostname format is invalid. Please use one of:")
+            logger.warning("  - redis.railway.internal (if supported)")
+            logger.warning("  - <service-name>.up.railway.internal (full service name)")
+            logger.warning("  - Or set REDIS_URL environment variable with correct hostname")
+            # フォールバック: redis.railway.internal を試す
+            logger.info("Attempting fallback to redis.railway.internal")
+            return "redis.railway.internal"
+        
+        return hostname
     
     # 優先順位1: REDIS_URL環境変数（Railwayが自動設定する場合がある）
     redis_url = os.environ.get("REDIS_URL")
     if redis_url:
-        logger.info(f"Using REDIS_URL environment variable: redis://***@{redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
+        host = extract_host_from_url(redis_url)
+        fixed_host = fix_redis_hostname(host) if host else None
+        if fixed_host and fixed_host != host:
+            # ホスト名を修正
+            redis_url = redis_url.replace(f"@{host}", f"@{fixed_host}").replace(f"redis://{host}", f"redis://{fixed_host}")
+            logger.warning(f"Fixed hostname in REDIS_URL: {host} -> {fixed_host}")
+        logger.info(f"Using REDIS_URL environment variable: redis://***@{extract_host_from_url(redis_url) or 'unknown'}")
         return redis_url
     
     # 優先順位2: CELERY_BROKER環境変数が明示的に設定されている場合、それを使用
     broker = ConfigManager.get("CELERY_BROKER")
     if broker and broker != "redis://127.0.0.1:6379/0":
-        logger.info(f"Using CELERY_BROKER from config: redis://***@{broker.split('@')[-1] if '@' in broker else broker}")
+        host = extract_host_from_url(broker)
+        fixed_host = fix_redis_hostname(host) if host else None
+        if fixed_host and fixed_host != host:
+            # ホスト名を修正
+            broker = broker.replace(f"@{host}", f"@{fixed_host}").replace(f"redis://{host}", f"redis://{fixed_host}")
+            logger.warning(f"Fixed hostname in CELERY_BROKER: {host} -> {fixed_host}")
+        logger.info(f"Using CELERY_BROKER from config: redis://***@{extract_host_from_url(broker) or 'unknown'}")
         return broker
     
     # 優先順位3: REDISHOST環境変数が存在する場合、それを使用（Railwayの自動設定）
     redis_host = os.environ.get("REDISHOST")
     if redis_host:
+        redis_host = fix_redis_hostname(redis_host)
         redis_port = os.environ.get("REDISPORT", "6379")
         redis_password = os.environ.get("REDISPASSWORD", "")
         redis_db = os.environ.get("REDISDB", "0")
@@ -50,7 +96,13 @@ def get_redis_url():
     # 優先順位4: CELERY_RESULT環境変数（フォールバック）
     result = ConfigManager.get("CELERY_RESULT")
     if result and result != "redis://127.0.0.1:6379/0":
-        logger.info(f"Using CELERY_RESULT from config: redis://***@{result.split('@')[-1] if '@' in result else result}")
+        host = extract_host_from_url(result)
+        fixed_host = fix_redis_hostname(host) if host else None
+        if fixed_host and fixed_host != host:
+            # ホスト名を修正
+            result = result.replace(f"@{host}", f"@{fixed_host}").replace(f"redis://{host}", f"redis://{fixed_host}")
+            logger.warning(f"Fixed hostname in CELERY_RESULT: {host} -> {fixed_host}")
+        logger.info(f"Using CELERY_RESULT from config: redis://***@{extract_host_from_url(result) or 'unknown'}")
         return result
     
     # デフォルト値
