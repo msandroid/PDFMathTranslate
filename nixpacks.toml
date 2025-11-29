@@ -4,7 +4,6 @@ nixPkgs = ["python312", "pip", "build-essential"]
 [phases.install]
 cmds = [
   "pip install --upgrade pip setuptools wheel",
-  "pip install -r requirements.txt",
   "pip install .",
   "pip install -U babeldoc<0.3.0 pymupdf<1.25.3 pdfminer-six==20250416"
 ]

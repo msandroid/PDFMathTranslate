@@ -35,6 +35,10 @@ dependencies = [
     "peewee>=3.17.8",
     "fontTools",
     "rich",
+    # Backend dependencies (required for API server and Celery worker)
+    "flask>=3.0.0",
+    "celery>=5.3.0",
+    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
