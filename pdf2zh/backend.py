@@ -18,12 +18,7 @@ worker_concurrency = int(os.environ.get("CELERY_WORKER_CONCURRENCY", "2"))
 # Redis接続URLの構築
 # RailwayではREDISHOST環境変数が自動的に設定される場合がある
 def get_redis_url():
-    # まず、CELERY_BROKER環境変数を確認
-    broker = ConfigManager.get("CELERY_BROKER")
-    if broker and broker != "redis://127.0.0.1:6379/0":
-        return broker
-    
-    # REDISHOST環境変数が存在する場合、それを使用
+    # REDISHOST環境変数が存在する場合、それを優先して使用（Railwayの自動設定）
     redis_host = os.environ.get("REDISHOST")
     if redis_host:
         redis_port = os.environ.get("REDISPORT", "6379")
@@ -34,6 +29,11 @@ def get_redis_url():
             return f"redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
         else:
             return f"redis://{redis_host}:{redis_port}/{redis_db}"
+    
+    # CELERY_BROKER環境変数が明示的に設定されている場合、それを使用
+    broker = ConfigManager.get("CELERY_BROKER")
+    if broker and broker != "redis://127.0.0.1:6379/0":
+        return broker
     
     # デフォルト値
     return "redis://127.0.0.1:6379/0"
