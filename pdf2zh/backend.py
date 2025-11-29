@@ -15,10 +15,35 @@ flask_app = Flask("pdf2zh")
 # Railwayなどのクラウド環境では、メモリ制限があるため低めの値が推奨されます
 worker_concurrency = int(os.environ.get("CELERY_WORKER_CONCURRENCY", "2"))
 
+# Redis接続URLの構築
+# RailwayではREDISHOST環境変数が自動的に設定される場合がある
+def get_redis_url():
+    # まず、CELERY_BROKER環境変数を確認
+    broker = ConfigManager.get("CELERY_BROKER")
+    if broker and broker != "redis://127.0.0.1:6379/0":
+        return broker
+    
+    # REDISHOST環境変数が存在する場合、それを使用
+    redis_host = os.environ.get("REDISHOST")
+    if redis_host:
+        redis_port = os.environ.get("REDISPORT", "6379")
+        redis_password = os.environ.get("REDISPASSWORD", "")
+        redis_db = os.environ.get("REDISDB", "0")
+        
+        if redis_password:
+            return f"redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
+        else:
+            return f"redis://{redis_host}:{redis_port}/{redis_db}"
+    
+    # デフォルト値
+    return "redis://127.0.0.1:6379/0"
+
+redis_url = get_redis_url()
+
 flask_app.config.from_mapping(
     CELERY=dict(
-        broker_url=ConfigManager.get("CELERY_BROKER", "redis://127.0.0.1:6379/0"),
-        result_backend=ConfigManager.get("CELERY_RESULT", "redis://127.0.0.1:6379/0"),
+        broker_url=ConfigManager.get("CELERY_BROKER", redis_url),
+        result_backend=ConfigManager.get("CELERY_RESULT", redis_url),
         worker_prefetch_multiplier=1,
         task_acks_late=True,
         worker_max_tasks_per_child=1000,
