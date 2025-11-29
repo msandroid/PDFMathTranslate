@@ -11,6 +11,8 @@ cmds = [
 [phases.build]
 cmds = []
 
-[start]
-cmd = "pdf2zh --celery worker --loglevel=info"
+# Start command is set per service in Railway dashboard
+# API server service: pdf2zh --flask
+# Worker service: pdf2zh --celery worker --loglevel=info
+# If Procfile exists, Railway will use it instead
 
