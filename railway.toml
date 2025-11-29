@@ -4,4 +4,6 @@ buildCommand = "pip install -r requirements.txt"
 
 [deploy]
 startCommand = "pdf2zh --celery worker --loglevel=info"
+healthcheckPath = ""
+healthcheckTimeout = 100
 
