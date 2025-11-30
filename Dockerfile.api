@@ -5,20 +5,33 @@ WORKDIR /app
 EXPOSE 11008
 
 ENV PYTHONUNBUFFERED=1
+ENV HOME=/home/appuser
 
 # Install system-level dependencies
 RUN apt-get update && \
     apt-get install --no-install-recommends -y libgl1 libglib2.0-0 libxext6 libsm6 libxrender1 && \
     rm -rf /var/lib/apt/lists/*
 
+# Create a non-root user for running the application
+RUN groupadd -r appuser && \
+    useradd -r -g appuser -u 1000 appuser && \
+    mkdir -p /app /home/appuser/.cache && \
+    chown -R appuser:appuser /app /home/appuser
+
 # Copy the rest of the application code
 COPY . .
 
 # Install the local package with backend dependencies and perform final updates/warmups
+# Run warmup as root, then change ownership
 RUN uv pip install --system --no-cache ".[backend]" && \
     uv pip install --system --no-cache -U "babeldoc<0.3.0" "pymupdf<1.25.3" "pdfminer-six==20250416" && \
     babeldoc --version && \
-    babeldoc --warmup
+    HOME=/home/appuser babeldoc --warmup && \
+    (if [ -d /root/.cache ]; then cp -r /root/.cache/* /home/appuser/.cache/ 2>/dev/null || true; fi) && \
+    chown -R appuser:appuser /app /home/appuser/.cache
+
+# Switch to non-root user
+USER appuser
 
 # Default command (can be overridden in docker-compose)
 CMD ["pdf2zh", "--flask"]
